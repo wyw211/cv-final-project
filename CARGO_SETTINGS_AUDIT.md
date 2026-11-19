@@ -1,6 +1,8 @@
 # CARGO：論文與官方設定核對
 
-核對日期：2026-11-18。僅核對 CARGO，未啟動訓練、反向傳播或測試集模型評估。
+設定核對日期：2026-11-18；執行狀態更新：2026-11-19。
+
+**CARGO baseline 已完成：啟用 activation checkpointing，保留 batch 256，完成正式 120 epochs（24,000 iterations）訓練，以及 ALL、A→G、A↔A、G↔G 四個協定的最終評估。** 全部流程於 2026-11-18 台灣時間 14:19 結束，結果見 [CARGO_BASELINE_RESULTS.md](CARGO_BASELINE_RESULTS.md)。本文件同時記錄設定核對與先前容量測試，歷史上的 OOM 不代表目前仍無法執行。
 
 ## 採用原則
 
@@ -8,11 +10,11 @@
 
 - **MoE λ 沿用官方程式的 0.0001**，不改成論文分析最佳值 0.001。報告及實驗紀錄保留此差異。
 - **跨視角評估沿用官方 CARGO_AG 的 Aerial query → Ground gallery（A→G）**，不自行改成雙向平均。報告應註明論文使用 A↔G 名稱，但本實作為單向 A→G。
-- **暫不開始正式訓練**。官方直接執行的 batch=256 已 OOM；使用者後續同意先驗證 activation checkpointing，目前已通過正確性及 3 批 CARGO batch=256 前後向容量檢查，詳見 `CHECKPOINTING.md`。沒有降低 batch 或修改模型架構，尚未做完整短訓練與速度測試。
+- **已完成正式 120 epochs 訓練與四協定評估**。未啟用 activation checkpointing 的 batch=256 曾在本機 OOM；之後加入 checkpointing，通過輸出／梯度一致性、3 批容量檢查、50-step 完整短訓練及 checkpoint 儲存／恢復驗證，再完成正式訓練。沒有降低 batch 或修改模型架構。驗證細節見 [CHECKPOINTING.md](CHECKPOINTING.md)、[SHORT_TRAINING.md](SHORT_TRAINING.md)；正式結果見 [CARGO_BASELINE_RESULTS.md](CARGO_BASELINE_RESULTS.md)。
 
 以官方單 GPU README 指令及其實際程式行為建立 baseline。論文和程式不一致時明確記錄，不自行更改程式來追求論文數字。這是「官方程式重現設定」，不宣稱所有細節與論文完全一致。
 
-官方 GitHub HEAD 與本機來源均為 `22ff906c28c63144d382c160d097b0de6f4f0510`。先前 Windows 路徑與評估修正仍保留，詳見 `VERIFICATION.md`。
+核對時採用的官方來源 commit 為 `22ff906c28c63144d382c160d097b0de6f4f0510`；本機版本以此為基礎加入 Windows／PyTorch 相容性、評估、checkpointing 與存檔修正，不表示目前本機 HEAD 仍等於該 commit。資料與評估驗證見 [VERIFICATION.md](VERIFICATION.md)，存檔規則見 [CHECKPOINT_POLICY.md](CHECKPOINT_POLICY.md)。
 
 ## 來源
 
@@ -33,6 +35,7 @@
 | Backbone | ImageNet 預訓練 ViT | ViT-base，指定 JX 權重 | 官方權重與模型 |
 | 輸入 | 256 × 128 | 訓練／測試同尺寸 | 相同 |
 | Batch | 256，64 個身分 × 4 張 | YAML 128；單 GPU README 覆蓋為 256 | **256** |
+| Activation checkpointing | 實驗設定未明列 | 原版未啟用 | **本機啟用，保留相同 batch 與模型；已驗證並完成訓練** |
 | 取樣 | 每身分 4 張 | NaiveIdentitySampler，NUM_INSTANCE=4 | 相同 |
 | Epochs | 120 | 120 | 相同 |
 | Optimizer | SGD with momentum | SGD；momentum=0.9，Nesterov=False | 官方程式 |
@@ -76,7 +79,7 @@
 
 ## CARGO 評估協定核對
 
-以下只檢查標籤、數量與跨相機正樣本是否存在，沒有計算實際檢索成績。
+下表是以標籤、數量與跨相機正樣本建立的協定核對表，本身不包含檢索成績。正式訓練後已完成四個指定協定的最終評估，實測 Rank-1／mAP 另列於 [CARGO_BASELINE_RESULTS.md](CARGO_BASELINE_RESULTS.md)。
 
 | 論文欄位／程式類別 | Query 張數 | Gallery 張數 | 有跨相機正樣本的 query |
 | --- | ---: | ---: | ---: |
@@ -99,7 +102,7 @@
 3. **資料總數差異**：論文描述 108,563 張；官方下載的 train/query/gallery 共 102,475 張（51,451 + 51,024）。沿用官方已發布 split，不自行補資料。
 4. **效率表標題歧義**：補充 Table 5 標題寫 ALL，但其 ViSA mAP=69.00，對應主表的跨視角欄，ALL 主表為 65.46。效率數字不可直接當成無歧義的 ALL 對照；自身測量另列輸入尺寸、batch、精度、硬體與參數計數口徑。
 5. **程式實作疑點，暫不修改**：DLFM 的兩個分支都呼叫 `share_gcn`，雖然建立了 `view_gcn`；圖節點特徵組合也位於 `no_grad` 中。這是忠實重現官方程式時必須保存的行為，不在設定核對時擅自改成另一種架構。
-6. **batch=256 已實測無法直接容納**：後續依使用者要求，在獨立程序使用官方模型、FP16 AMP、官方 SGD 的 contiguous parameter/gradient buffers 及合成圖片測試。訓練模式前向即 OOM，未進入反向；PyTorch 峰值 allocated=15.716 GiB，reserved=15.871 GiB，GPU 容量=15.920 GiB，失敗配置額外需要 240 MiB。未執行 optimizer.step() 或寫入 checkpoint。不能以梯度累積直接宣稱等價，因為 batch-hard triplet 和 BatchNorm 依賴實際 batch。詳見 `output/audit/batch_256_memory.json`。
+6. **原版 batch=256 曾 OOM，已透過 activation checkpointing 解決**：未啟用 checkpointing 的獨立對照測試使用官方模型、FP16 AMP、官方 SGD contiguous buffers 及合成圖片，在訓練模式前向即 OOM；當次 allocated 峰值為 15.716 GiB，詳見 `output/audit/batch_256_memory.json`。後續保留實際 batch 256 並啟用 checkpointing，50-step 完整短訓練的 allocated 峰值約 11.447 GiB，並已成功完成正式 120 epochs。此處不是將小 batch 累積成 256；普通梯度累積也不能直接宣稱等價，因為 batch-hard triplet 和 BatchNorm 依賴實際 batch。
 7. **參數分析不等於統一訓練設定**：補充 §8 在 E 掃描時固定 k=1，且 A↔A 的最佳 E 為 7；官方統一設定仍是 E=8、k=2。本次保留統一設定，不依測試協定另挑專家數。
 
 論文 Table 1 的參考數字另列如下，屬已發表結果，不是本機結果，也不是保證可重現的門檻：
@@ -111,13 +114,15 @@
 | G↔G | 88.39 | 83.90 |
 | A↔A | 82.50 | 67.78 |
 
-## 已準備但未執行
+## 本機實作與完成結果
 
-新增 `configs/CARGO/visa_official_single_gpu.yml`：繼承官方 YAML，只將 batch 設為官方單 GPU README 的 256，並調整本機權重及輸出路徑；其餘演算法設定不改。舊的 `visa_windows.yml` 仍是 batch-16 bring-up 設定，不作為正式官方 baseline。
+正式訓練使用 [configs/CARGO/visa_official_checkpointing.yml](configs/CARGO/visa_official_checkpointing.yml)，繼承 `visa_official_single_gpu.yml` 並啟用 activation checkpointing。後者繼承官方 `visa.yml`，將 batch 設為官方單 GPU README 的 256，並調整本機權重及輸出路徑。舊的 `visa_windows.yml` 是 batch-16 bring-up 設定，沒有用於正式 baseline。
 
-完整合併設定已保存到 `output/audit/visa_official_single_gpu_resolved.yml`。此檔為 config 合併快照，尚未套用 trainer 自動填入的 2,500 類；來源種子與寫死 loss 係數另記錄於 `output/audit/cargo_settings_audit.json`。
+正式執行的完整設定保存在 `logs/CARGO/ViSA_official_checkpointing/config.yaml`，已由 trainer 填入 2,500 個訓練身分類別。設定核對階段另外保存的 `output/audit/visa_official_single_gpu_resolved.yml` 只是原版配方的合併快照，不是最後啟用 checkpointing 的正式執行設定；來源種子與寫死 loss 係數的核對記錄仍在 `output/audit/cargo_settings_audit.json`。`logs/` 與 `output/` 依 `.gitignore` 留在本機，未隨程式碼上傳 GitHub。
 
-設定核對本身未啟動訓練。後續使用者授權的記憶體測試只嘗試前向／反向容量檢查，實際在前向即 OOM，沒有參數更新。正式開跑前仍須處理 batch=256 的記憶體限制，以及驗證完整 optimizer／AMP／checkpoint 流程。
+已完成的工作包括：輸出與梯度一致性驗證、batch 256 容量驗證、50-step 真實權重更新與恢復測試、每 5 epochs 保存 latest／結束保存 final 的機制，以及正式 120 epochs 訓練與四協定評估。最終模型為 `logs/CARGO/ViSA_official_checkpointing/model_final.pth`，事先固定採最後一個 epoch，沒有依測試集分數挑選。訓練運算耗時 10 小時 57 分 20 秒，含評估與其他 hooks 總耗時 12 小時 5 分 9 秒。結果表見 [CARGO_BASELINE_RESULTS.md](CARGO_BASELINE_RESULTS.md)。
+
+後續仍未完成的專題項目是正式效率量測、改進方法、消融實驗與成功／失敗檢索視覺化；這些與「baseline 訓練是否完成」是不同進度。
 
 ## 原文與程式位置索引
 
@@ -127,4 +132,4 @@
 - A→G 實作：`fastreid/data/datasets/cargo.py:146` 使用 `view='Aerial'` 建立 query，147 行使用 `view='Ground'` 建立 gallery；164–165 行過濾其他視角。
 - 反方向 `CARGO_GA` 不在 `configs/CARGO/visa.yml:101` 的 `DATASETS.TESTS`，因此官方預設沒有計算兩方向平均。
 
-記憶體測試以 allocator fraction=1.0 將 PyTorch 配置量限制在 GPU 實體容量內，避免 Windows 共享系統記憶體被誤認為能放進 16 GB 專用顯存。輸入為 `[256,3,256,128]`；64 個合成身分、每人 4 張，空拍／地面各半；不是 CARGO 效能測試，也不是正式訓練。只驗證本次官方直接執行路徑，未測試 activation checkpointing 等節省記憶體的改寫。
+最初未啟用 checkpointing 的記憶體對照測試，以 allocator fraction=1.0 將 PyTorch 配置量限制在 GPU 實體容量內，避免將 Windows 共享系統記憶體誤認為專用顯存。該次合成輸入為 `[256,3,256,128]`，只用於確認原版 OOM。後續 activation checkpointing、真實 CARGO 短訓練及完整訓練的驗證，分別記錄於 [CHECKPOINTING.md](CHECKPOINTING.md)、[SHORT_TRAINING.md](SHORT_TRAINING.md) 與 [CARGO_BASELINE_RESULTS.md](CARGO_BASELINE_RESULTS.md)，不應將最初對照測試的範圍當成目前執行狀態。
