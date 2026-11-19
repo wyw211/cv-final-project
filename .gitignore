@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+datasets/
+weights/
+downloads/
+logs/
+output/

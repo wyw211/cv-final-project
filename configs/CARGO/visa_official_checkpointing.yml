@@ -1,0 +1,6 @@
+# Experimental memory-saving profile. Official algorithm settings stay intact.
+_BASE_: visa_official_single_gpu.yml
+MODEL:
+  BACKBONE:
+    ACTIVATION_CHECKPOINTING: True
+OUTPUT_DIR: logs/CARGO/ViSA_official_checkpointing

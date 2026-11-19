@@ -198,18 +198,11 @@ class PeriodicCheckpointer(_PeriodicCheckpointer, HookBase):
 
     def before_train(self):
         self.max_epoch = self.trainer.max_epoch
-        if len(self.trainer.cfg.DATASETS.TESTS) == 1:
-            self.metric_name = "metric"
-        else:
-            self.metric_name = self.trainer.cfg.DATASETS.TESTS[0] + "/metric"
 
     def after_epoch(self):
-        # No way to use **kwargs
-        storage = get_event_storage()
-        metric_dict = dict(
-            metric=storage.latest()[self.metric_name][0] if self.metric_name in storage.latest() else -1
-        )
-        self.step(self.trainer.epoch, **metric_dict)
+        # TrainerBase increments iter before after_epoch: it is already the
+        # number of completed iterations, not the last zero-based step index.
+        self.step(self.trainer.epoch, completed_iterations=self.trainer.iter)
 
 
 class LRScheduler(HookBase):

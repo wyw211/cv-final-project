@@ -52,6 +52,8 @@ _C.MODEL.BACKBONE.STRIDE_SIZE = (16, 16)
 _C.MODEL.BACKBONE.DROP_PATH_RATIO = 0.1
 _C.MODEL.BACKBONE.DROP_RATIO = 0.0
 _C.MODEL.BACKBONE.ATT_DROP_RATE = 0.0
+# Recompute ViSA transformer blocks during backward; preserve upstream default.
+_C.MODEL.BACKBONE.ACTIVATION_CHECKPOINTING = False
 # If use ImageNet pretrain model
 _C.MODEL.BACKBONE.PRETRAIN = False
 # Pretrain model path

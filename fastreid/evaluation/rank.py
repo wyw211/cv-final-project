@@ -152,8 +152,6 @@ def eval_market1501(distmat, q_pids, g_pids, q_camids, g_camids, max_rank):
         all_AP.append(AP)
 
     assert num_valid_q > 0, 'Error: all query identities do not appear in gallery'
-    all_cmc[0][0] = 0
-    print(len(all_cmc))
     all_cmc = np.asarray(all_cmc).astype(np.float32)
     all_cmc = all_cmc.sum(0) / num_valid_q
 

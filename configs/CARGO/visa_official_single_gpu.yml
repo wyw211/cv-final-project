@@ -1,0 +1,10 @@
+# Official README single-GPU recipe, not the batch-16 Windows bring-up profile.
+# Only the local weight/output paths differ from that recipe.
+# Load-balancing coefficient remains the upstream hardcoded 0.0001.
+_BASE_: visa.yml
+MODEL:
+  BACKBONE:
+    PRETRAIN_PATH: weights/jx_vit_base_p16_224-80ecf9dd.pth
+SOLVER:
+  IMS_PER_BATCH: 256
+OUTPUT_DIR: logs/CARGO/ViSA_official_single_gpu

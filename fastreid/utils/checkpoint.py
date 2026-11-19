@@ -4,6 +4,7 @@
 import copy
 import logging
 import os
+import tempfile
 from collections import defaultdict
 from typing import Any
 from typing import Optional, List, Dict, NamedTuple, Tuple, Iterable
@@ -90,8 +91,19 @@ class Checkpointer(object):
         save_file = os.path.join(self.save_dir, basename)
         assert os.path.basename(save_file) == basename, basename
         self.logger.info("Saving checkpoint to {}".format(save_file))
-        with PathManager.open(save_file, "wb") as f:
-            torch.save(data, f)
+        # Write beside the destination, then atomically replace it. Interrupted
+        # serialization must not destroy the previous resumable checkpoint.
+        descriptor, temporary = tempfile.mkstemp(prefix="." + basename + ".", suffix=".tmp", dir=self.save_dir)
+        os.close(descriptor)
+        try:
+            with PathManager.open(temporary, "wb") as f:
+                torch.save(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, save_file)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
         self.tag_last_checkpoint(basename)
 
     def load(self, path: str, checkpointables: Optional[List[str]] = None) -> object:
@@ -198,8 +210,17 @@ class Checkpointer(object):
             last_filename_basename (str): the basename of the last filename.
         """
         save_file = os.path.join(self.save_dir, "last_checkpoint")
-        with PathManager.open(save_file, "w") as f:
-            f.write(last_filename_basename)
+        descriptor, temporary = tempfile.mkstemp(prefix=".last_checkpoint.", suffix=".tmp", dir=self.save_dir)
+        os.close(descriptor)
+        try:
+            with PathManager.open(temporary, "w") as f:
+                f.write(last_filename_basename)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, save_file)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def _load_file(self, f: str):
         """
@@ -297,9 +318,8 @@ class Checkpointer(object):
 
 class PeriodicCheckpointer:
     """
-    Save checkpoints periodically. When `.step(iteration)` is called, it will
-    execute `checkpointer.save` on the given checkpointer, if iteration is a
-    multiple of period or if `max_iter` is reached.
+    Save the latest state at fixed epoch intervals, and a fixed final state.
+    Epoch inputs are zero-based. Selection never depends on evaluation metrics.
     """
 
     def __init__(self, checkpointer: Any, period: int, max_epoch: int = None):
@@ -313,8 +333,9 @@ class PeriodicCheckpointer:
         """
         self.checkpointer = checkpointer
         self.period = int(period)
+        if self.period <= 0:
+            raise ValueError("Checkpoint period must be positive")
         self.max_epoch = max_epoch
-        self.best_metric = -1
 
     def step(self, epoch: int, **kwargs: Any):
         """
@@ -326,24 +347,12 @@ class PeriodicCheckpointer:
                 :meth:`Checkpointer.save`.
         """
         epoch = int(epoch)
-        additional_state = {"epoch": epoch}
-        additional_state.update(kwargs)
-        if (epoch + 1) % self.period == 0 and epoch < self.max_epoch - 1:
-            if additional_state["metric"] > self.best_metric:
-                self.checkpointer.save(
-                    "model_best", **additional_state
-                )
-                self.best_metric = additional_state["metric"]
-            # # Put it behind best model save to make last checkpoint valid
-            # self.checkpointer.save(
-            #     "model_{:04d}".format(epoch), **additional_state
-            # )
-        if epoch >= self.max_epoch - 1:
-            if additional_state["metric"] > self.best_metric:
-                self.checkpointer.save(
-                    "model_best", **additional_state
-                )
-            # self.checkpointer.save("model_final", **additional_state)
+        additional_state = dict(kwargs, epoch=epoch, completed_epochs=epoch + 1)
+        is_final = self.max_epoch is not None and epoch + 1 == self.max_epoch
+        if (epoch + 1) % self.period == 0 or is_final:
+            self.checkpointer.save("model_latest", **additional_state)
+        if is_final:
+            self.checkpointer.save("model_final", **additional_state)
 
     def save(self, name: str, **kwargs: Any):
         """

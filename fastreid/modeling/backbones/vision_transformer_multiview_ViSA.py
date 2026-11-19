@@ -24,6 +24,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from kiwisolver import strength
 
 from fastreid.layers import DropPath, trunc_normal_, to_2tuple
@@ -404,6 +405,21 @@ class VisionTransformer_multiview(nn.Module):
 
         self.apply(self._init_weights)
         self.inner_sub = inner_sub
+        self.activation_checkpointing = False
+
+    def _run_block(self, block, x):
+        # Bind the block as an explicit argument: backward recomputation must
+        # not capture the changing loop variable. Include the original token
+        # subtraction inside the checkpointed region.
+        def forward_block(inputs, layer):
+            outputs = layer(inputs)
+            if self.inner_sub:
+                outputs[:, 0] = outputs[:, 0] - outputs[:, 1]
+            return outputs
+
+        if self.activation_checkpointing and self.training and torch.is_grad_enabled():
+            return checkpoint(forward_block, x, block, use_reentrant=False, preserve_rng_state=True)
+        return forward_block(x, block)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -438,18 +454,12 @@ class VisionTransformer_multiview(nn.Module):
         x = self.pos_drop(x)
         if self.local_feat:
             for blk in self.blocks[:-1]:
-                x = blk(x)
-                # perform inner sub
-                if self.inner_sub:
-                    x[:, 0] = x[:, 0] - x[:, 1]
+                x = self._run_block(blk, x)
             return x
 
         else:
             for blk in self.blocks:
-                x = blk(x)
-                # perform inner sub
-                if self.inner_sub:
-                    x[:, 0] = x[:, 0] - x[:, 1]
+                x = self._run_block(blk, x)
 
             x = self.norm(x)
             return x[:, 0].reshape(x.shape[0], -1, 1, 1), x[:, 1].reshape(x.shape[0], -1, 1, 1)
@@ -607,6 +617,7 @@ class Vision_Transformer_ViSA(nn.Module):
         pretrain = cfg.MODEL.BACKBONE.PRETRAIN
         pretrain_path = cfg.MODEL.BACKBONE.PRETRAIN_PATH
         self.use_prm = cfg.MODEL.BACKBONE.USE_PRM
+        self.activation_checkpointing = cfg.MODEL.BACKBONE.ACTIVATION_CHECKPOINTING
 
         # VDT init
         num_depth = {'small': 8, 'base': 12,}[depth]
@@ -625,6 +636,7 @@ class Vision_Transformer_ViSA(nn.Module):
 
         if pretrain:
             self.base.load_param(pretrain_path)
+        self.base.activation_checkpointing = self.activation_checkpointing
 
         block = self.base.blocks[-1]
         layer_norm = self.base.norm
@@ -679,7 +691,11 @@ class Vision_Transformer_ViSA(nn.Module):
         B = x.shape[0]
         # VDT
         local_features = self.base(x, camera_id, view_id)
-        local_feat = self.b1(local_features)
+        if self.activation_checkpointing and self.training and torch.is_grad_enabled():
+            # b1 contains only Transformer + LayerNorm, no stateful BatchNorm.
+            local_feat = checkpoint(self.b1, local_features, use_reentrant=False, preserve_rng_state=True)
+        else:
+            local_feat = self.b1(local_features)
         global_features = local_feat[:, 0:1]
         view_features = local_feat[:, 1:2]
         local_feat = local_features[:, 2:]

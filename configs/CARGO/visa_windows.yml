@@ -1,0 +1,11 @@
+_BASE_: visa.yml
+MODEL:
+  BACKBONE:
+    PRETRAIN_PATH: weights/jx_vit_base_p16_224-80ecf9dd.pth
+DATALOADER:
+  NUM_WORKERS: 0
+SOLVER:
+  IMS_PER_BATCH: 16
+TEST:
+  IMS_PER_BATCH: 32
+OUTPUT_DIR: logs/CARGO/ViSA_windows

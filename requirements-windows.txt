@@ -1,0 +1,20 @@
+# PyTorch is installed separately from the official CUDA 12.8 wheel index.
+matplotlib
+scipy
+Pillow
+numpy
+prettytable
+easydict
+scikit-learn
+pyyaml
+yacs
+termcolor
+tabulate
+tensorboard
+opencv-python
+gdown
+faiss-cpu
+pandas
+tqdm
+packaging
+mat4py

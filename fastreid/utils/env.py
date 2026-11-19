@@ -9,7 +9,28 @@ import sys
 from datetime import datetime
 import torch
 
-__all__ = ["seed_all_rng"]
+__all__ = ["seed_all_rng", "RandomState"]
+
+
+class RandomState:
+    """Serializable main-process RNG state; worker queues are not included."""
+
+    def state_dict(self):
+        numpy_state = np.random.get_state()
+        return {
+            "python": random.getstate(),
+            "torch_cpu": torch.get_rng_state(),
+            "torch_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+            "numpy": (numpy_state[0], torch.from_numpy(numpy_state[1].astype(np.int64)), *numpy_state[2:]),
+        }
+
+    def load_state_dict(self, state):
+        random.setstate(state["python"])
+        torch.set_rng_state(state["torch_cpu"])
+        if state["torch_cuda"] and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(state["torch_cuda"])
+        numpy_state = state["numpy"]
+        np.random.set_state((numpy_state[0], numpy_state[1].numpy().astype(np.uint32), *numpy_state[2:]))
 
 
 TORCH_VERSION = tuple(int(x) for x in torch.__version__.split(".")[:2])

@@ -26,7 +26,7 @@ from fastreid.solver import build_lr_scheduler, build_optimizer
 from fastreid.utils import comm
 from fastreid.utils.checkpoint import Checkpointer
 from fastreid.utils.collect_env import collect_env_info
-from fastreid.utils.env import seed_all_rng
+from fastreid.utils.env import seed_all_rng, RandomState
 from fastreid.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter
 from fastreid.utils.file_io import PathManager
 from fastreid.utils.logger import setup_logger
@@ -237,6 +237,9 @@ class DefaultTrainer(TrainerBase):
             optimizer=optimizer,
             **self.scheduler,
         )
+        if self.grad_scaler is not None:
+            self.checkpointer.checkpointables["grad_scaler"] = self.grad_scaler
+        self.checkpointer.checkpointables["random_state"] = RandomState()
 
         self.start_epoch = 0
         self.max_epoch = cfg.SOLVER.MAX_EPOCH
@@ -312,14 +315,16 @@ class DefaultTrainer(TrainerBase):
             self._last_eval_results = self.test(self.cfg, self.model)
             return self._last_eval_results
 
-        # Do evaluation before checkpointer, because then if it fails,
-        # we can use the saved checkpoint to debug.
+        # Save before evaluation so final weights remain recoverable even when
+        # evaluation fails. Checkpoints never depend on a test-set metric.
+        if comm.is_main_process():
+            ret.append(hooks.PeriodicCheckpointer(self.checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD))
         ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
         if comm.is_main_process():
-            ret.append(hooks.PeriodicCheckpointer(self.checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD))
             # run writers in the end, so that evaluation metrics are written
-            ret.append(hooks.PeriodicWriter(self.build_writers(), 200))
+            # Keep a lightweight progress heartbeat during long local runs.
+            ret.append(hooks.PeriodicWriter(self.build_writers(), 20))
 
         return ret
 

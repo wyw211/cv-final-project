@@ -7,6 +7,7 @@ import copy
 import logging
 import time
 import itertools
+import shutil
 from collections import OrderedDict
 
 import numpy as np
@@ -132,12 +133,13 @@ class ReidEvaluator(DatasetEvaluator):
             try:
                 from .rank_cylib.rank_cy import evaluate_cy
             except ImportError:
-                start_time = time.time()
-                logger.info("> compiling reid evaluation cython tool")
-
-                compile_helper()
-
-                logger.info(
-                    ">>> done with reid evaluation cython tool. Compilation time: {:.3f} "
-                    "seconds".format(time.time() - start_time))
+                if shutil.which("make") is None:
+                    logger.warning("Cython evaluation and make are unavailable; using Python rank evaluation.")
+                else:
+                    start_time = time.time()
+                    logger.info("> compiling reid evaluation cython tool")
+                    compile_helper()
+                    logger.info(
+                        ">>> done with reid evaluation cython tool. Compilation time: {:.3f} "
+                        "seconds".format(time.time() - start_time))
         comm.synchronize()

@@ -38,8 +38,8 @@ class CARGO(ImageDataset):
 
         data = []
         for img_path in img_paths:
-            pid = int(img_path.split('/')[-1].split('_')[2])
-            camid = int(img_path.split('/')[-1].split('_')[0][3:])
+            pid = int(osp.basename(img_path).split('_')[2])
+            camid = int(osp.basename(img_path).split('_')[0][3:])
             viewid = 'Aerial' if camid <= 5 else 'Ground'
             camid -= 1  # index starts from 0
 
@@ -76,8 +76,8 @@ class CARGO_AA(ImageDataset):
 
         data = []
         for img_path in img_paths:
-            pid = int(img_path.split('/')[-1].split('_')[2])
-            camid = int(img_path.split('/')[-1].split('_')[0][3:])
+            pid = int(osp.basename(img_path).split('_')[2])
+            camid = int(osp.basename(img_path).split('_')[0][3:])
             viewid = 'Aerial' if camid <= 5 else 'Ground'
             camid -= 1  # index starts from 0
             if viewid == 'Ground':
@@ -115,8 +115,8 @@ class CARGO_GG(ImageDataset):
 
         data = []
         for img_path in img_paths:
-            pid = int(img_path.split('/')[-1].split('_')[2])
-            camid = int(img_path.split('/')[-1].split('_')[0][3:])
+            pid = int(osp.basename(img_path).split('_')[2])
+            camid = int(osp.basename(img_path).split('_')[0][3:])
             viewid = 'Aerial' if camid <= 5 else 'Ground'
             if viewid == 'Aerial':
                 continue
@@ -155,8 +155,8 @@ class CARGO_AG(ImageDataset):
 
         data = []
         for img_path in img_paths:
-            pid = int(img_path.split('/')[-1].split('_')[2])
-            camid = int(img_path.split('/')[-1].split('_')[0][3:])
+            pid = int(osp.basename(img_path).split('_')[2])
+            camid = int(osp.basename(img_path).split('_')[0][3:])
             viewid = 'Aerial' if camid <= 5 else 'Ground'
             camid = 1 if camid <= 5 else 2
             camid -= 1  # index starts from 0
@@ -196,8 +196,8 @@ class CARGO_GA(ImageDataset):
 
         data = []
         for img_path in img_paths:
-            pid = int(img_path.split('/')[-1].split('_')[2])
-            camid = int(img_path.split('/')[-1].split('_')[0][3:])
+            pid = int(osp.basename(img_path).split('_')[2])
+            camid = int(osp.basename(img_path).split('_')[0][3:])
             viewid = 'Aerial' if camid <= 5 else 'Ground'
             camid = 1 if camid <= 5 else 2
             camid -= 1  # index starts from 0
