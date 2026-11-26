@@ -1,0 +1,12 @@
+# Pilot (screening) run: P2 + P1 = PersonViT baseline + view-aware prototype contrastive loss.
+# v1's expert-input fix gave no gain on PersonViT weights, so PCL goes on the plain baseline.
+_BASE_: pilot_val_personvit_baseline.yml
+MODEL:
+  LOSSES:
+    PCL:
+      ENABLED: True
+      WEIGHT: 0.5
+      TEMP: 0.05
+      MOMENTUM: 0.2
+      CROSS_WEIGHT: 0.5
+OUTPUT_DIR: logs/CARGO_pilot/personvit_pcl

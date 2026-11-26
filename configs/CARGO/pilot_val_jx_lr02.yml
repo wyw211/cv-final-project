@@ -1,0 +1,6 @@
+# Pilot (control) run: ImageNet jx weights with the PersonViT runs' 0.2 x LR on the
+# pretrained ViT. Separates the effect of the PersonViT weights from the LR factor.
+_BASE_: pilot_val_baseline.yml
+SOLVER:
+  PRETRAINED_LR_FACTOR: 0.2
+OUTPUT_DIR: logs/CARGO_pilot/jx_lr02

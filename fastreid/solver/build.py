@@ -186,6 +186,8 @@ def build_optimizer(cfg, model, contiguous=True):
         bias_lr_factor=cfg.SOLVER.BIAS_LR_FACTOR,
         heads_lr_factor=cfg.SOLVER.HEADS_LR_FACTOR,
         weight_decay_bias=cfg.SOLVER.WEIGHT_DECAY_BIAS,
+        pretrained_lr_factor=cfg.SOLVER.PRETRAINED_LR_FACTOR,
+        pretrained_prefixes=tuple(cfg.SOLVER.PRETRAINED_PREFIXES),
         freeze_layers=cfg.MODEL.FREEZE_LAYERS if cfg.SOLVER.FREEZE_ITERS > 0 else [],
     )
 
@@ -218,6 +220,8 @@ def get_default_optimizer_params(
         weight_decay_bias: Optional[float] = None,
         overrides: Optional[Dict[str, Dict[str, float]]] = None,
         freeze_layers: Optional[list] = [],
+        pretrained_lr_factor: Optional[float] = 1.0,
+        pretrained_prefixes: tuple = (),
 ):
     """
     Get default param list for optimizer, with support for a few types of
@@ -297,6 +301,11 @@ def get_default_optimizer_params(
             hyperparams.update(overrides.get(module_param_name, {}))
             if module_name.split('.')[0] == "heads" and (heads_lr_factor is not None and heads_lr_factor != 1.0):
                 hyperparams["lr"] = hyperparams.get("lr", base_lr) * heads_lr_factor
+            # Lower LR for modules initialised from a pretrained checkpoint (e.g. the
+            # self-supervised PersonViT backbone); 1.0 keeps the official behaviour.
+            if pretrained_lr_factor != 1.0 and any(
+                    (module_name + '.').startswith(p) for p in pretrained_prefixes):
+                hyperparams["lr"] = hyperparams.get("lr", base_lr) * pretrained_lr_factor
             name = module_name + '.' + module_param_name
             freeze_status = "normal"
             # Search freeze layer names, it must match from beginning, so use `match` not `search`

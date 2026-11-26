@@ -1,0 +1,6 @@
+# Pilot (screening) run: P2 + P3 = PersonViT baseline with 4 instead of 8 experts per group.
+_BASE_: pilot_val_personvit_baseline.yml
+MODEL:
+  BACKBONE:
+    EXPERTS: 4
+OUTPUT_DIR: logs/CARGO_pilot/personvit_experts4

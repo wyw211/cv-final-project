@@ -1,0 +1,19 @@
+# Pilot (screening) run: v3 = v1 expert-input fix + router fix.
+# Base chosen on the validation split: v1 (ALL mAP 82.42) beat v2 (79.33) and
+# the baseline (80.55), so v2's attention switches are not used.
+# Diagnosis (tools/probe_router_inputs.py, val images): the view token fed to the
+# aerial/ground routers is almost the same for every image (pairwise cos 0.98,
+# router-logit std over images 0.06), so the official model sends every aerial
+# image to the same 2 of 8 experts (1 distinct top-2 set), likewise ground.
+_BASE_: pilot_val_expert_input_fix.yml
+MODEL:
+  BACKBONE:
+    # Aerial/ground routers read the mean of the b1 patch tokens (cos 0.39-0.57).
+    ROUTER_INPUT: content
+    # Switch-Transformer load-balancing loss with its usual weight.
+    MOE_BALANCE_LOSS: switch
+    MOE_BALANCE_LAMBDA: 0.01
+    # Noisy top-k gating; 0.3 matches the measured top-2 vs 3rd logit margin
+    # (0.15-0.44), so it re-ranks close experts without randomising routing.
+    ROUTER_NOISE_STD: 0.3
+OUTPUT_DIR: logs/CARGO_pilot/router_v3

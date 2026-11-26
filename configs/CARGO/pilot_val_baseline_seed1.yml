@@ -1,0 +1,5 @@
+# Seed-variance check: the baseline pilot repeated with a different global seed
+# (model init, sampler order, augmentation). Everything else identical.
+_BASE_: pilot_val_baseline.yml
+SEED: 1
+OUTPUT_DIR: logs/CARGO_pilot/baseline_seed1

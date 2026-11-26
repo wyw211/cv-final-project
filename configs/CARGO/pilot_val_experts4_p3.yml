@@ -1,0 +1,8 @@
+# Pilot (screening) run: P3 = v1 expert-input fix with 4 instead of 8 experts per group.
+# Baseline router usage on val: 14 of 24 experts never selected (~99M idle params).
+# Top-2 routing is kept, so per-image compute is about the same; parameters drop.
+_BASE_: pilot_val_expert_input_fix.yml
+MODEL:
+  BACKBONE:
+    EXPERTS: 4
+OUTPUT_DIR: logs/CARGO_pilot/experts4_p3

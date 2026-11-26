@@ -1,0 +1,6 @@
+# Pilot: L2 = final method + deterministic auto-gamma brightness normalisation (train and test).
+_BASE_: pilot_val_personvit_experts4.yml
+INPUT:
+  AUTOGAMMA:
+    ENABLED: True
+OUTPUT_DIR: logs/CARGO_pilot/light_l2

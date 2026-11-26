@@ -4,7 +4,7 @@
 @contact: sherlockliao01@gmail.com
 """
 
-__all__ = ['ToTensor', 'RandomPatch', 'AugMix', ]
+__all__ = ['ToTensor', 'RandomPatch', 'AugMix', 'RandomIllumination', 'AutoGamma', ]
 
 import math
 import random
@@ -159,3 +159,69 @@ class AugMix(object):
 
         mixed = (1 - m) * image + m * mix
         return mixed.astype(np.uint8)
+
+
+def _luminance(arr):
+    """Mean luminance in [0, 1] of an HxWx3 float array in [0, 1]."""
+    return float((0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).mean())
+
+
+class RandomIllumination(object):
+    """L1 low-light augmentation (training only). Bright images (mean luminance above
+    bright_thresh) are darkened with probability `prob`: gamma > 1, reduced contrast and
+    sensor-like Gaussian noise, imitating CARGO night frames (also desaturated: night frames are grey-green). Dark images (below
+    dark_thresh) are brightened with gamma < 1. Uses only the image's own pixels."""
+
+    def __init__(self, prob=0.5, dark_gamma=(2.0, 4.0), bright_gamma=(0.4, 0.75),
+                 contrast=(0.3, 0.7), noise=0.02, dark_thresh=0.30, bright_thresh=0.38,
+                 saturation=(0.3, 0.8)):
+        self.prob, self.dark_gamma, self.bright_gamma = prob, dark_gamma, bright_gamma
+        self.contrast, self.noise = contrast, noise
+        self.dark_thresh, self.bright_thresh = dark_thresh, bright_thresh
+        self.saturation = saturation
+
+    def __call__(self, img):
+        if random.random() >= self.prob:
+            return img
+        from PIL import Image
+        x = np.asarray(img.convert('RGB'), dtype=np.float32) / 255.
+        m = _luminance(x)
+        if m > self.bright_thresh:
+            x = x ** random.uniform(*self.dark_gamma)
+            c = random.uniform(*self.contrast)
+            mu = x.mean()
+            x = mu + c * (x - mu)
+            gray = (0.299 * x[..., 0] + 0.587 * x[..., 1] + 0.114 * x[..., 2])[..., None]
+            k = random.uniform(*self.saturation)
+            x = k * x + (1 - k) * gray
+            if self.noise > 0:
+                x = x + np.random.normal(0, random.uniform(0, self.noise), x.shape).astype(np.float32)
+        elif m < self.dark_thresh:
+            x = x ** random.uniform(*self.bright_gamma)
+        else:
+            return img
+        return Image.fromarray((np.clip(x, 0, 1) * 255 + 0.5).astype(np.uint8))
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(prob={self.prob})'
+
+
+class AutoGamma(object):
+    """L2 deterministic brightness normalisation (training and testing). Images whose mean
+    luminance m is below `target` get gamma = log(target)/log(m), clipped to
+    [min_gamma, 1]; brighter images are unchanged. Uses only the image's own pixels."""
+
+    def __init__(self, target=0.45, min_gamma=0.4):
+        self.target, self.min_gamma = target, min_gamma
+
+    def __call__(self, img):
+        from PIL import Image
+        x = np.asarray(img.convert('RGB'), dtype=np.float32) / 255.
+        m = min(max(_luminance(x), 1e-3), 0.999)
+        if m >= self.target:
+            return img
+        g = max(self.min_gamma, math.log(self.target) / math.log(m))
+        return Image.fromarray((np.clip(x ** g, 0, 1) * 255 + 0.5).astype(np.uint8))
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(target={self.target}, min_gamma={self.min_gamma})'

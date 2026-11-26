@@ -1,0 +1,33 @@
+{
+ "_env": {
+  "gpu": "NVIDIA GeForce RTX 5070 Ti",
+  "torch": "2.7.1+cu128",
+  "python": "3.13.7"
+ },
+ "ViSA_official_checkpointing": {
+  "params_M": 275.618328,
+  "GFLOPs_Aerial": 42.059900032,
+  "GMACs_Aerial": 21.029950016,
+  "latency_bs1_ms_Aerial": 15.215849998639897,
+  "GFLOPs_Ground": 42.059900032,
+  "GMACs_Ground": 21.029950016,
+  "latency_bs1_ms_Ground": 15.123249999305699,
+  "throughput_bs64_img_per_s": 156.84784839681598
+ },
+ "ViSA_personvit_experts4": {
+  "params_M": 190.397964,
+  "GFLOPs_Aerial": 42.059887744,
+  "GMACs_Aerial": 21.029943872,
+  "latency_bs1_ms_Aerial": 14.120849999017082,
+  "GFLOPs_Ground": 42.059887744,
+  "GMACs_Ground": 21.029943872,
+  "latency_bs1_ms_Ground": 14.25425000343239,
+  "throughput_bs64_img_per_s": 138.9056190556133
+ },
+ "_aqe": {
+  "nq": 312,
+  "ng": 50712,
+  "dim": 1536,
+  "seconds_median": 90.99310849999893
+ }
+}

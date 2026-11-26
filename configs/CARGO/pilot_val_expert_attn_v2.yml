@@ -1,0 +1,13 @@
+# Pilot (screening) run: v2 = v1 expert-input fix + non-uniform expert attention.
+# Identical to pilot_val_expert_input_fix.yml except the two v2 switches.
+# Diagnosis of v1: |prompt| ~0.55 vs ~27 for the LayerNorm'd keys, so attention
+# logits were ~0 and every query attended uniformly (entropy 1.0).
+_BASE_: pilot_val_expert_input_fix.yml
+MODEL:
+  BACKBONE:
+    # Prompt tokens on the same scale as the keys (|prompt| ~27).
+    EXPERT_PROMPT_STD: 1.0
+    # Cosine attention with a learnable temperature (init 10).
+    EXPERT_QK_NORM: True
+    EXPERT_QK_SCALE_INIT: 10.0
+OUTPUT_DIR: logs/CARGO_pilot/expert_attn_v2

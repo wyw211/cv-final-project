@@ -63,6 +63,16 @@ def build_transforms(cfg, is_train=True):
         do_rotation = cfg.INPUT.ROTATION.ENABLED
         degrees = cfg.INPUT.ROTATION.DEGREES
 
+        # L2: deterministic brightness normalisation (also applied at test time).
+        if cfg.INPUT.AUTOGAMMA.ENABLED:
+            res.append(AutoGamma(cfg.INPUT.AUTOGAMMA.TARGET, cfg.INPUT.AUTOGAMMA.MIN_GAMMA))
+        # L1: random low-light / brightening augmentation (training only).
+        if cfg.INPUT.LOWLIGHT.ENABLED:
+            ll = cfg.INPUT.LOWLIGHT
+            res.append(RandomIllumination(ll.PROB, tuple(ll.DARK_GAMMA), tuple(ll.BRIGHT_GAMMA),
+                                          tuple(ll.CONTRAST), ll.NOISE, ll.DARK_THRESH, ll.BRIGHT_THRESH,
+                                          tuple(ll.SATURATION)))
+
         if do_autoaug:
             res.append(T.RandomApply([AutoAugment()], p=autoaug_prob))
 
@@ -98,6 +108,8 @@ def build_transforms(cfg, is_train=True):
         do_crop = cfg.INPUT.CROP.ENABLED
         crop_size = cfg.INPUT.CROP.SIZE
 
+        if cfg.INPUT.AUTOGAMMA.ENABLED:
+            res.append(AutoGamma(cfg.INPUT.AUTOGAMMA.TARGET, cfg.INPUT.AUTOGAMMA.MIN_GAMMA))
         if size_test[0] > 0:
             res.append(T.Resize(size_test[0] if len(size_test) == 1 else size_test, interpolation=3))
         if do_crop:

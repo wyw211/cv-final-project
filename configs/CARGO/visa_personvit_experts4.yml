@@ -1,0 +1,20 @@
+# Final method, full training: official ViSA recipe (visa_official_checkpointing.yml,
+# 120 epochs, full CARGO train set) with three changes chosen on the train/val pilots:
+#   1. PersonViT LUPerson self-supervised ViT-B/16 weights instead of ImageNet jx_vit_base
+#      (converted by tools/convert_personvit.py, sha256 4f562d20...).
+#   2. Pretrained ViT at 0.2 x BASE_LR (PersonViT's own fine-tuning LR, linearly scaled).
+#   3. 4 instead of 8 experts per group (same val accuracy, 31% fewer parameters).
+# The CARGO test set is evaluated once, at epoch 120 (EVAL_PERIOD 120 from the base).
+_BASE_: visa_official_checkpointing.yml
+MODEL:
+  BACKBONE:
+    PRETRAIN_PATH: weights/personvit_vitb_lup_teacher_e240_s12.pth
+    EXPERTS: 4
+SOLVER:
+  PRETRAINED_LR_FACTOR: 0.2
+TEST:
+  # Same as the pilots: eval data in the main process and 128-image batches, which
+  # avoided the Windows commit-limit error and VRAM spill. Features are unchanged.
+  NUM_WORKERS: 0
+  IMS_PER_BATCH: 128
+OUTPUT_DIR: logs/CARGO/ViSA_personvit_experts4

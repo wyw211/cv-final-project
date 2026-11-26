@@ -1,0 +1,14 @@
+# Improvement: make ETGM experts actually read patch tokens (accuracy target).
+# Everything else is identical to the reproduced baseline
+# (visa_official_checkpointing.yml: batch 256, lambda 0.0001, 120 epochs, AMP).
+_BASE_: visa_official_checkpointing.yml
+MODEL:
+  BACKBONE:
+    # Experts cross-attend to [routing token, b1 patch tokens] instead of a
+    # single token (the official cross-attention is degenerate).
+    EXPERT_KV: patch
+    # Each expert query selects its own top-k patches (paper Eq. 8).
+    GRAPH_PER_QUERY: True
+    # The view-specific DLFM branch uses its own GCN (paper Sec. 3.4).
+    SEPARATE_VIEW_GCN: True
+OUTPUT_DIR: logs/CARGO/ViSA_expert_input_fix

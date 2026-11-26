@@ -1,0 +1,1 @@
+4f562d20a555d61e4677d940b8b49785c952226646a1a25d72595b4ddcd87a12 *weights/personvit_vitb_lup_teacher_e240_s12.pth

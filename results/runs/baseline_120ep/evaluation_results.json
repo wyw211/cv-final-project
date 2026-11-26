@@ -1,0 +1,48 @@
+{
+  "status": "training_and_all_four_retrieval_evaluations_completed",
+  "completed_epochs": 120,
+  "completed_iterations": 24000,
+  "finished_at_taipei": "2026-11-18T14:19:40+08:00",
+  "results_percent": {
+    "CARGO": {
+      "Rank-1": 68.91,
+      "Rank-5": 82.37,
+      "Rank-10": 87.82,
+      "mAP": 64.59,
+      "mINP": 54.03,
+      "metric": 66.75
+    },
+    "CARGO_AG": {
+      "Rank-1": 69.15,
+      "Rank-5": 81.91,
+      "Rank-10": 87.23,
+      "mAP": 68.16,
+      "mINP": 60.31,
+      "metric": 68.66
+    },
+    "CARGO_AA": {
+      "Rank-1": 77.5,
+      "Rank-5": 85.0,
+      "Rank-10": 85.0,
+      "mAP": 66.99,
+      "mINP": 52.48,
+      "metric": 72.24
+    },
+    "CARGO_GG": {
+      "Rank-1": 85.71,
+      "Rank-5": 91.96,
+      "Rank-10": 93.75,
+      "mAP": 82.02,
+      "mINP": 75.67,
+      "metric": 83.87
+    }
+  },
+  "result_precision": "two decimal places, extracted from native evaluation tables in train.stdout.log",
+  "checkpoint": "model_final.pth",
+  "checkpoint_sha256": "95aae55bcf3f34eccb0bae38abc4cef2386ebaed2c4cbbe7e64b36998ee3b5f8",
+  "training_compute_time": "10:57:20",
+  "total_time_including_hooks": "12:05:09",
+  "lambda": 0.0001,
+  "cross_view_protocol": "CARGO_AG is directional Aerial query to Ground gallery",
+  "formal_efficiency_measurements_completed": false
+}

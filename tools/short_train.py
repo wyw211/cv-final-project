@@ -103,6 +103,10 @@ def summarize(report):
 
 
 def main():
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config-file',default='configs/CARGO/visa_official_checkpointing.yml')
+    args=parser.parse_args()
     stamp=datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y%m%d_%H%M%S')
     output=ROOT/'logs'/f'bringup_{stamp}_{uuid.uuid4().hex[:6]}'
     output.mkdir(parents=True,exist_ok=False)
@@ -110,7 +114,7 @@ def main():
             'output_dir':str(output),'iterations_requested':50,'test_evaluations':0,
             'dataset':'CARGO train only','batch_size':256,'loader_workers':8,
             'activation_checkpointing':True,'warmup_iterations':2000,
-            'max_epoch_setting':120,'rows':[]}
+            'max_epoch_setting':120,'config_file':args.config_file,'rows':[]}
     (ROOT/'output/audit/latest_short_training.txt').write_text(str(output),encoding='utf-8')
     trainer=None
     try:
@@ -119,7 +123,7 @@ def main():
         torch.backends.cudnn.benchmark=True
         torch.cuda.reset_peak_memory_stats()
         report.update(gpu=torch.cuda.get_device_name(0),torch=str(torch.__version__),cuda=torch.version.cuda)
-        cfg=get_cfg();cfg.merge_from_file('configs/CARGO/visa_official_checkpointing.yml')
+        cfg=get_cfg();cfg.merge_from_file(args.config_file)
         cfg.OUTPUT_DIR=str(output)
         assert cfg.SOLVER.IMS_PER_BATCH==256 and cfg.DATALOADER.NUM_WORKERS==8
         seed_all_rng(0)

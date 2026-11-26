@@ -1,0 +1,23 @@
+# Pilot (screening) run: official baseline on the CARGO train/val split.
+# Never touches the official CARGO test images.
+# Schedule is the official one scaled from 120 to 20 epochs; warmup keeps the
+# same 8.3% share (2000/24000 -> 300/3600). Everything else is unchanged.
+_BASE_: visa_official_checkpointing.yml
+SOLVER:
+  MAX_EPOCH: 20
+  WARMUP_ITERS: 300
+  CHECKPOINT_PERIOD: 5
+TEST:
+  EVAL_PERIOD: 5
+  # Evaluation data in the main process: with 8 live training workers, 4 extra
+  # eval workers exhausted the Windows commit limit at epoch 10 (error 1455).
+  NUM_WORKERS: 0
+  # Smaller eval batches (official 384). With the fix's patch-key experts, a
+  # 384-image eval batch on top of the training allocator spilled VRAM into
+  # system memory (130 s/batch at epoch 10). Batch size does not change
+  # eval-mode features. The baseline pilot itself ran with 384.
+  IMS_PER_BATCH: 128
+DATASETS:
+  NAMES: ("CARGO_VAL",)
+  TESTS: ("CARGO_VAL", "CARGO_VAL_AG", "CARGO_VAL_AA", "CARGO_VAL_GG")
+OUTPUT_DIR: logs/CARGO_pilot/baseline

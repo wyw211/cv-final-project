@@ -1,0 +1,14 @@
+# Pilot (screening) run: P1 = v1 expert-input fix + view-aware prototype contrastive loss.
+# After ProAlign (arXiv 2611.04980) PCL: per identity, momentum aerial/ground prototypes;
+# each feature is pulled to the other view's prototype of its identity (cross, 0.5) and
+# its own view's (same, 0.5). Training only; inference unchanged.
+_BASE_: pilot_val_expert_input_fix.yml
+MODEL:
+  LOSSES:
+    PCL:
+      ENABLED: True
+      WEIGHT: 0.5
+      TEMP: 0.05
+      MOMENTUM: 0.2
+      CROSS_WEIGHT: 0.5
+OUTPUT_DIR: logs/CARGO_pilot/pcl_p1

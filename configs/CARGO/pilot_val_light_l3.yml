@@ -1,0 +1,12 @@
+# Pilot: L3 = final method (PersonViT + 4 experts) + illumination-consistency loss only.
+# Changed 2026-11-26 after L1 hurt every protocol: the main training images are NOT
+# re-lit (no L1 augmentation); only 64 GPU re-lit copies per batch feed the extra
+# consistency branch, whose invariant feature is pulled to the clean original's.
+_BASE_: pilot_val_personvit_experts4.yml
+MODEL:
+  LOSSES:
+    ILLUM:
+      ENABLED: True
+      WEIGHT: 1.0
+      NUM: 64
+OUTPUT_DIR: logs/CARGO_pilot/light_l3

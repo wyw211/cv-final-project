@@ -1,6 +1,9 @@
 # ViSA
 Code for paper: View-Aware Semantic Alignment for Aerial-Ground Person Re-Identification (CVPR2026)
 
+> **組員請先看 [TEAM_GUIDE.md](TEAM_GUIDE.md)**：我們的成果、最終結果表、檔案導覽與重現方式。
+> 以下是官方 README 的原文。
+
 ## Requirements
 
 Please refer to [INSTALL.md](./INSTALL.md).

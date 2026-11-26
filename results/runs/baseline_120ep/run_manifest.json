@@ -1,0 +1,28 @@
+{
+  "pid": 20116,
+  "started_at_taipei": "2026-11-18T02:13:45.7693935+08:00",
+  "executable": "C:\\Project\\CV final project\\.venv\\Scripts\\python.exe",
+  "arguments": [
+    "-u",
+    "tools/train_net.py",
+    "--config-file",
+    "configs/CARGO/visa_official_checkpointing.yml"
+  ],
+  "working_directory": "C:\\Project\\CV final project\\ViSA",
+  "output_directory": "C:\\Project\\CV final project\\ViSA\\logs\\CARGO\\ViSA_official_checkpointing",
+  "epochs": 120,
+  "batch_size": 256,
+  "checkpointing": true,
+  "checkpoint_period_epochs": 5,
+  "test_evaluation_epoch": 120,
+  "progress_period_iterations": 20,
+  "status": "completed",
+  "python_process_id": 6012,
+  "verified_completed_iterations": 40,
+  "last_verified_loss": 35.136646439888864,
+  "initial_estimated_remaining_hours": 10.096125366111103,
+  "finished_at_taipei": "2026-11-18T14:19:40+08:00",
+  "completed_epochs": 120,
+  "completed_iterations": 24000,
+  "evaluation_results_file": "evaluation_results.json"
+}

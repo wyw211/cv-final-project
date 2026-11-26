@@ -1,0 +1,7 @@
+# Pilot: L1 = final method (PersonViT + 4 experts) + low-light augmentation (training only).
+# Val diagnosis: A<->A night mAP 76.75 vs day 92.64; 21 of 22 R1 failures are night queries.
+_BASE_: pilot_val_personvit_experts4.yml
+INPUT:
+  LOWLIGHT:
+    ENABLED: True
+OUTPUT_DIR: logs/CARGO_pilot/light_l1

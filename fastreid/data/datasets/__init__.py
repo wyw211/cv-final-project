@@ -36,6 +36,7 @@ from .wildtracker import WildTrackCrop
 from .cuhk_sysu import cuhkSYSU
 from .uavhuman import UAVHuman
 from .cargo import CARGO, CARGO_AA, CARGO_GG, CARGO_AG, CARGO_GA
+from .cargo_val import CARGO_VAL, CARGO_VAL_AG, CARGO_VAL_AA, CARGO_VAL_GG
 from .g2apsreid import G2APS_ReID, G2APS_ReID_A2G, G2APS_ReID_G2A
 from .agreid import AG_ReID, AG_ReID_G2A
 from .agreidv2 import AG_ReID_v2_G2A, AG_ReID_v2

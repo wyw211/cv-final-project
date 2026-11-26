@@ -129,6 +129,7 @@ def _test_loader_from_config(cfg, *, dataset_name=None, test_set=None, num_query
         "test_set": test_set,
         "test_batch_size": cfg.TEST.IMS_PER_BATCH,
         "num_query": num_query,
+        "num_workers": cfg.TEST.NUM_WORKERS,
     }
 
 

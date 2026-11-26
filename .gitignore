@@ -1,7 +1,10 @@
 __pycache__/
 *.py[cod]
-datasets/
-weights/
-downloads/
-logs/
-output/
+# Top-level data / weights / outputs only (a bare "datasets/" also hid fastreid/data/datasets/cargo_val.py)
+/datasets/
+/weights/
+/downloads/
+/logs/
+/output/
+# Local copies of the paper (not redistributed; see https://github.com/Cat-Zero/ViSA)
+/references/

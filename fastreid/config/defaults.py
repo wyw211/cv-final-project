@@ -74,6 +74,35 @@ _C.MODEL.BACKBONE.PROMPT_NAIVE_PROMPT = False
 _C.MODEL.BACKBONE.EXPERTS = 8
 _C.MODEL.BACKBONE.TOP_K = 2
 _C.MODEL.BACKBONE.GRAPH_TOP_K = 64
+# Expert-input fix (improvement). Defaults reproduce the official code exactly.
+# "global": experts cross-attend to a single routing token (official; the
+#           cross-attention is degenerate because softmax over one key is 1).
+# "patch":  experts cross-attend to [routing token, patch tokens of b1].
+_C.MODEL.BACKBONE.EXPERT_KV = "global"
+# False: one top-k patch set chosen by the global token, shared by all queries
+#        (official). True: each expert query selects its own top-k (paper Eq. 8).
+_C.MODEL.BACKBONE.GRAPH_PER_QUERY = False
+# False: both DLFM branches call share_gcn (official). True: the view-specific
+#        branch uses its own view_gcn, as described in the paper.
+_C.MODEL.BACKBONE.SEPARATE_VIEW_GCN = False
+# v2 (expert attention). Std of the expert prompt-token init (official 0.02,
+# i.e. |prompt| ~0.55 while LayerNorm'd keys are ~27, which makes the attention
+# logits ~0 and the attention uniform).
+_C.MODEL.BACKBONE.EXPERT_PROMPT_STD = 0.02
+# Cosine (QK-normalised) expert cross-attention with a learnable temperature.
+_C.MODEL.BACKBONE.EXPERT_QK_NORM = False
+_C.MODEL.BACKBONE.EXPERT_QK_SCALE_INIT = 10.0
+# v3 (router). Input of the aerial/ground routers: "view" = view token
+# (official), "content" = mean of the b1 patch tokens of the image.
+_C.MODEL.BACKBONE.ROUTER_INPUT = "view"
+# Load-balancing loss: "official" = E * sum(mean_prob^2); "switch" = Switch
+# Transformer E * sum(selected_fraction * mean_prob).
+_C.MODEL.BACKBONE.MOE_BALANCE_LOSS = "official"
+# Std of Gaussian noise added to router logits for top-k selection, training only.
+_C.MODEL.BACKBONE.ROUTER_NOISE_STD = 0.0
+# Weight of the load-balancing loss (official code hard-codes 0.0001; paper's
+# best value is 0.001).
+_C.MODEL.BACKBONE.MOE_BALANCE_LAMBDA = 0.0001
 
 
 # ---------------------------------------------------------------------------- #
@@ -134,6 +163,24 @@ _C.MODEL.LOSSES.TRI.HARD_MINING = False
 _C.MODEL.LOSSES.TRI.SCALE = 1.0
 
 # Circle Loss options
+# View-aware prototype contrastive loss (P1, after ProAlign's PCL). Off by default.
+# Per identity, momentum-updated aerial and ground prototypes; each feature is pulled
+# to its own identity's prototype of the other view (cross) and of its own view (same).
+# L3: illumination-consistency loss. NUM images of each batch are re-lit on the GPU
+# (darkened if bright, brightened if dark) and their invariant feature is pulled to the
+# original's (detached) by cosine distance. Training only.
+_C.MODEL.LOSSES.ILLUM = CN()
+_C.MODEL.LOSSES.ILLUM.ENABLED = False
+_C.MODEL.LOSSES.ILLUM.WEIGHT = 1.0
+_C.MODEL.LOSSES.ILLUM.NUM = 64
+
+_C.MODEL.LOSSES.PCL = CN()
+_C.MODEL.LOSSES.PCL.ENABLED = False
+_C.MODEL.LOSSES.PCL.WEIGHT = 0.5        # per branch (invariant global + local)
+_C.MODEL.LOSSES.PCL.TEMP = 0.05
+_C.MODEL.LOSSES.PCL.MOMENTUM = 0.2      # weight of the old prototype
+_C.MODEL.LOSSES.PCL.CROSS_WEIGHT = 0.5  # cross-view term weight; same-view gets 1 - this
+
 _C.MODEL.LOSSES.CIRCLE = CN()
 _C.MODEL.LOSSES.CIRCLE.MARGIN = 0.25
 _C.MODEL.LOSSES.CIRCLE.GAMMA = 128
@@ -193,6 +240,21 @@ _C.INPUT.PADDING.MODE = 'constant'
 _C.INPUT.PADDING.SIZE = 10
 
 # Random Rotation
+# L1: low-light augmentation (training only), see transforms.RandomIllumination
+_C.INPUT.LOWLIGHT = CN({"ENABLED": False})
+_C.INPUT.LOWLIGHT.PROB = 0.5
+_C.INPUT.LOWLIGHT.DARK_GAMMA = [2.0, 4.0]
+_C.INPUT.LOWLIGHT.BRIGHT_GAMMA = [0.4, 0.75]
+_C.INPUT.LOWLIGHT.CONTRAST = [0.3, 0.7]
+_C.INPUT.LOWLIGHT.SATURATION = [0.3, 0.8]
+_C.INPUT.LOWLIGHT.NOISE = 0.02
+_C.INPUT.LOWLIGHT.DARK_THRESH = 0.30
+_C.INPUT.LOWLIGHT.BRIGHT_THRESH = 0.38
+# L2: deterministic brightness normalisation (train and test), see transforms.AutoGamma
+_C.INPUT.AUTOGAMMA = CN({"ENABLED": False})
+_C.INPUT.AUTOGAMMA.TARGET = 0.45
+_C.INPUT.AUTOGAMMA.MIN_GAMMA = 0.4
+
 _C.INPUT.ROTATION = CN({"ENABLED": False})
 _C.INPUT.ROTATION.DEGREES = 30
 
@@ -265,6 +327,10 @@ _C.SOLVER.BASE_LR = 3e-4
 # This LR is applied to the last classification layer if
 # you want to 10x higher than BASE_LR.
 _C.SOLVER.HEADS_LR_FACTOR = 1.
+# LR multiplier for parameters under these module-name prefixes (pretrained ViT and
+# its copied last block). 1.0 = official. Used by the PersonViT (P2) pilots.
+_C.SOLVER.PRETRAINED_LR_FACTOR = 1.0
+_C.SOLVER.PRETRAINED_PREFIXES = ["backbone.base.", "backbone.b1."]
 
 _C.SOLVER.MOMENTUM = 0.9
 _C.SOLVER.NESTEROV = False
@@ -326,6 +392,11 @@ _C.TEST.EVAL_PERIOD = 20
 
 # Number of images per batch across all machines.
 _C.TEST.IMS_PER_BATCH = 64
+# DataLoader workers for evaluation (upstream hard-coded 4). On Windows every
+# worker commits ~6 GB of virtual memory; 0 loads in the main process and
+# avoids exhausting the commit limit while the 8 training workers are alive.
+# Affects only evaluation speed, not results.
+_C.TEST.NUM_WORKERS = 4
 _C.TEST.METRIC = "cosine"
 _C.TEST.ROC = CN({"ENABLED": False})
 _C.TEST.FLIP = CN({"ENABLED": False})
@@ -351,6 +422,10 @@ _C.TEST.PRECISE_BN.NUM_ITER = 300
 # Misc options
 # ---------------------------------------------------------------------------- #
 _C.OUTPUT_DIR = "logs/"
+
+# Global RNG seed (upstream hard-codes 0 in default_setup). Different values
+# change model init, sampler order and augmentation; used for seed-variance runs.
+_C.SEED = 0
 
 # Benchmark different cudnn algorithms.
 # If input images have very different sizes, this option will have large overhead

@@ -16,6 +16,59 @@ from fastreid.modeling.losses import *
 from .build import META_ARCH_REGISTRY
 
 
+class ViewPrototypeMemory(nn.Module):
+    """Momentum prototypes per (identity, view) for the view-aware prototype loss (P1).
+
+    For a feature f of identity y seen from view v, the loss is
+        w_c * CE(cos(f, P[:, 1-v]) / t, y) + (1 - w_c) * CE(cos(f, P[:, v]) / t, y)
+    over all identities whose prototype for that view exists. After the loss, each
+    (y, v) prototype present in the batch moves towards the batch mean:
+        P = normalize(m * P + (1 - m) * normalize(mean f)).
+    Training only: inference does not use it.
+    """
+
+    def __init__(self, num_classes, dim, temp=0.05, momentum=0.2, cross_weight=0.5):
+        super().__init__()
+        self.temp, self.momentum, self.cross_weight = temp, momentum, cross_weight
+        self.register_buffer('protos', torch.zeros(num_classes, 2, dim))
+        self.register_buffer('valid', torch.zeros(num_classes, 2, dtype=torch.bool))
+
+    def _term(self, f, targets, view):
+        P = self.protos[:, view].clone()             # [C, D]; clone: updated in place later
+        ok = self.valid[targets, view]              # samples whose positive exists
+        if not ok.any():
+            return f.sum() * 0.0
+        logits = f @ P.t() / self.temp
+        logits = logits.masked_fill(~self.valid[:, view].unsqueeze(0), float('-inf'))
+        return F.cross_entropy(logits[ok], targets[ok])
+
+    def forward(self, feats, targets, view_id):
+        f = F.normalize(feats.float(), dim=-1)
+        loss = 0.0
+        for v in (0, 1):
+            m = view_id == v
+            if not m.any():
+                continue
+            loss = loss + m.float().mean() * (
+                self.cross_weight * self._term(f[m], targets[m], 1 - v)
+                + (1 - self.cross_weight) * self._term(f[m], targets[m], v))
+        self._update(f.detach(), targets, view_id)
+        return loss
+
+    @torch.no_grad()
+    def _update(self, f, targets, view_id):
+        key = targets * 2 + view_id
+        uniq, inv = key.unique(return_inverse=True)
+        mean = torch.zeros(len(uniq), f.shape[1], device=f.device).index_add_(0, inv, f)
+        mean = F.normalize(mean, dim=-1)
+        ids, vs = uniq // 2, uniq % 2
+        old = self.protos[ids, vs]
+        fresh = ~self.valid[ids, vs]
+        new = torch.where(fresh.unsqueeze(1), mean, self.momentum * old + (1 - self.momentum) * mean)
+        self.protos[ids, vs] = F.normalize(new, dim=-1)
+        self.valid[ids, vs] = True
+
+
 @META_ARCH_REGISTRY.register()
 class Baseline_multiview_ViSA(nn.Module):
     """
@@ -35,7 +88,9 @@ class Baseline_multiview_ViSA(nn.Module):
             pixel_mean,
             pixel_std,
             use_visa=True,
-            loss_kwargs=None
+            loss_kwargs=None,
+            pcl=None,
+            illum=None,
     ):
         """
         NOTE: this interface is experimental.
@@ -57,6 +112,17 @@ class Baseline_multiview_ViSA(nn.Module):
         self.loss_kwargs = loss_kwargs
 
         self.use_visa = use_visa
+        # P1: optional view-aware prototype memories (invariant global, local branch).
+        self.pcl_weight = 0.0
+        if pcl is not None and pcl['enabled']:
+            self.pcl_weight = pcl['weight']
+            mk = lambda: ViewPrototypeMemory(pcl['num_classes'], pcl['dim'], pcl['temp'],
+                                             pcl['momentum'], pcl['cross_weight'])
+            self.pcl_global, self.pcl_local = mk(), mk()
+
+        # L3: illumination-consistency loss (training only).
+        self.illum_weight = illum['weight'] if illum is not None and illum['enabled'] else 0.0
+        self.illum_num = illum['num'] if illum is not None else 0
 
         self.register_buffer('pixel_mean', torch.Tensor(pixel_mean).view(1, -1, 1, 1), False)
         self.register_buffer('pixel_std', torch.Tensor(pixel_std).view(1, -1, 1, 1), False)
@@ -82,6 +148,20 @@ class Baseline_multiview_ViSA(nn.Module):
             'pixel_mean': cfg.MODEL.PIXEL_MEAN,
             'pixel_std': cfg.MODEL.PIXEL_STD,
             'use_visa': cfg.MODEL.USE_VISA,
+            'pcl': {
+                'enabled': cfg.MODEL.LOSSES.PCL.ENABLED,
+                'weight': cfg.MODEL.LOSSES.PCL.WEIGHT,
+                'temp': cfg.MODEL.LOSSES.PCL.TEMP,
+                'momentum': cfg.MODEL.LOSSES.PCL.MOMENTUM,
+                'cross_weight': cfg.MODEL.LOSSES.PCL.CROSS_WEIGHT,
+                'num_classes': cfg.MODEL.HEADS.NUM_CLASSES,
+                'dim': cfg.MODEL.BACKBONE.FEAT_DIM,
+            },
+            'illum': {
+                'enabled': cfg.MODEL.LOSSES.ILLUM.ENABLED,
+                'weight': cfg.MODEL.LOSSES.ILLUM.WEIGHT,
+                'num': cfg.MODEL.LOSSES.ILLUM.NUM,
+            },
             'loss_kwargs':
                 {
                     # loss name
@@ -120,7 +200,32 @@ class Baseline_multiview_ViSA(nn.Module):
     def device(self):
         return self.pixel_mean.device
 
+    @staticmethod
+    def _relight(raw):
+        """Re-light raw [0, 255] images on the GPU: bright ones are darkened (gamma 2-4,
+        contrast 0.3-0.7, desaturation 0.3-0.8, noise), dark ones brightened (gamma 0.4-0.75). Mirrors L1."""
+        x = (raw / 255.).clamp(0, 1)
+        n = x.shape[0]
+        lum = (0.299 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2]).mean(dim=(1, 2))
+        dark = lum < 0.30
+        u = torch.rand(n, device=x.device)
+        g = torch.where(dark, 0.4 + 0.35 * u, 2.0 + 2.0 * u).view(n, 1, 1, 1)
+        x = x.clamp_min(1e-6) ** g
+        c = torch.where(dark, torch.ones_like(u), 0.3 + 0.4 * torch.rand(n, device=x.device)).view(n, 1, 1, 1)
+        mu = x.mean(dim=(1, 2, 3), keepdim=True)
+        x = mu + c * (x - mu)
+        gray = (0.299 * x[:, 0:1] + 0.587 * x[:, 1:2] + 0.114 * x[:, 2:3])
+        ks = torch.where(dark, torch.ones_like(u), 0.3 + 0.5 * torch.rand(n, device=x.device)).view(n, 1, 1, 1)
+        x = ks * x + (1 - ks) * gray
+        sigma = torch.where(dark, torch.zeros_like(u), 0.02 * torch.rand(n, device=x.device)).view(n, 1, 1, 1)
+        x = x + sigma * torch.randn_like(x)
+        return x.clamp(0, 1) * 255.
+
     def forward(self, batched_inputs):
+        relit = None
+        if self.training and self.illum_weight > 0:
+            k = min(self.illum_num, batched_inputs['images'].shape[0])
+            relit = self._relight(batched_inputs['images'][:k].clone())
         images = self.preprocess_image(batched_inputs)
         # print(batched_inputs.keys())
         if 'camids' in batched_inputs.keys():
@@ -158,7 +263,20 @@ class Baseline_multiview_ViSA(nn.Module):
             view_outputs = self.view_heads(view_feats, targets_view)
 
             losses = self.losses(outputs, outputs_global, local_outputs, view_outputs, targets, targets_view)
-            losses['load_balance_loss'] = 0.0001 * load_balance_loss_s
+            # Official value 0.0001 (hard-coded upstream); now MODEL.BACKBONE.MOE_BALANCE_LAMBDA.
+            losses['load_balance_loss'] = getattr(self.backbone, 'moe_balance_lambda', 0.0001) * load_balance_loss_s
+            if relit is not None:
+                k = relit.shape[0]
+                relit = (relit - self.pixel_mean) / self.pixel_std
+                cam_k = camids[:k] if torch.is_tensor(camids) else camids
+                g2, _, v2, _, _ = self.backbone(relit, cam_k, view_id[:k])
+                f2 = torch.nn.functional.normalize((g2 - v2).float(), dim=1)
+                f1 = torch.nn.functional.normalize(features[:k].detach().float(), dim=1)
+                losses['loss_illum'] = self.illum_weight * (1 - (f1 * f2).sum(dim=1)).mean()
+            if self.pcl_weight > 0:
+                losses['loss_pcl'] = self.pcl_weight * self.pcl_global(outputs['features'], targets, view_id)
+                if self.use_visa:
+                    losses['loss_pcl_local'] = self.pcl_weight * self.pcl_local(local_outputs['features'], targets, view_id)
             return losses
         else:
             outputs = self.heads(features)

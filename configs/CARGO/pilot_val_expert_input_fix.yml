@@ -1,0 +1,9 @@
+# Pilot (screening) run: expert-input fix. Identical to pilot_val_baseline.yml
+# except the three MODEL.BACKBONE switches.
+_BASE_: pilot_val_baseline.yml
+MODEL:
+  BACKBONE:
+    EXPERT_KV: patch
+    GRAPH_PER_QUERY: True
+    SEPARATE_VIEW_GCN: True
+OUTPUT_DIR: logs/CARGO_pilot/expert_input_fix

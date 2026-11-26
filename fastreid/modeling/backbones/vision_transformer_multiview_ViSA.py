@@ -92,7 +92,9 @@ class CrossAttention(nn.Module):
         embedding_dim: int,         # 输入channel
         num_heads: int,             # attention的head数
         downsample_rate: int = 1,   # 下采样
-        smax_mode=None
+        smax_mode=None,
+        qk_norm: bool = False,
+        qk_scale_init: float = 10.0,
     ) -> None:
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -105,6 +107,11 @@ class CrossAttention(nn.Module):
         self.v_proj = nn.Linear(embedding_dim, self.internal_dim)
         self.out_proj = nn.Linear(self.internal_dim, embedding_dim)
         self.smax = smax_mode
+        # v2 option: cosine attention with a learnable temperature, so logits
+        # do not collapse to ~0 when the queries are tiny (official: off).
+        self.qk_norm = qk_norm
+        if qk_norm:
+            self.logit_scale = nn.Parameter(torch.tensor(math.log(qk_scale_init)))
     def _separate_heads(self, x, num_heads: int) :
         b, n, c = x.shape
         x = x.reshape(b, n, num_heads, c // num_heads)
@@ -129,9 +136,15 @@ class CrossAttention(nn.Module):
 
         # Attention
         _, _, _, c_per_head = q.shape
-        attn = q @ k.permute(0, 1, 3, 2)  # B,N_heads,N_tokens,C_per_head
-        # Scale
-        attn = attn / math.sqrt(c_per_head)
+        if self.qk_norm:
+            q = F.normalize(q, dim=-1)
+            k = F.normalize(k, dim=-1)
+            attn = q @ k.permute(0, 1, 3, 2)
+            attn = attn * self.logit_scale.clamp(max=math.log(100.0)).exp()
+        else:
+            attn = q @ k.permute(0, 1, 3, 2)  # B,N_heads,N_tokens,C_per_head
+            # Scale
+            attn = attn / math.sqrt(c_per_head)
         if self.smax is not None:
             attn = softmax_one(attn, dim=-1)
         else:
@@ -178,9 +191,12 @@ class PromptRecapBlock(nn.Module):
                 num_heads: int,
                 activation = nn.ReLU,
                 mlp_ratio = 2.0,
-                method='attn'):
+                method='attn',
+                qk_norm=False,
+                qk_scale_init=10.0):
         super().__init__()
-        self.cross_attn = CrossAttention(embedding_dim, num_heads)
+        self.cross_attn = CrossAttention(embedding_dim, num_heads, qk_norm=qk_norm,
+                                         qk_scale_init=qk_scale_init)
         self.norm1 = nn.LayerNorm(embedding_dim)
         self.norm2 = nn.LayerNorm(embedding_dim)
         self.attn = Attention(embedding_dim, num_heads)
@@ -217,33 +233,51 @@ class PromptRecapBlock(nn.Module):
         return queries
 
 class Router(nn.Module):
-    def __init__(self, dim, num_experts, top_k=2):
+    def __init__(self, dim, num_experts, top_k=2, noise_std=0.0, balance='official'):
         super().__init__()
         self.gate = nn.Linear(dim, num_experts)
         self.top_k = top_k
         self.num_experts = num_experts
+        # v3 options (official: noise_std=0, balance='official').
+        self.noise_std = noise_std
+        assert balance in ('official', 'switch'), balance
+        self.balance = balance
 
     def forward(self, x):
         x_flat = x.squeeze(1)  # [B, D]
 
         logits = self.gate(x_flat)  # [B, num_experts]
-        top_k_logits, top_k_indices = torch.topk(logits, self.top_k, dim=-1)
+        select_logits = logits
+        if self.noise_std > 0 and self.training:
+            # Noisy top-k gating: lets rarely chosen experts get selected.
+            select_logits = logits + torch.randn_like(logits) * self.noise_std
+        top_k_logits, top_k_indices = torch.topk(select_logits, self.top_k, dim=-1)
         top_k_weights = F.softmax(top_k_logits, dim=-1)  # [B, top_k]
 
         probs = F.softmax(logits, dim=-1)  # [B, num_experts]
         importance = probs.mean(dim=0)
-        importance = importance / (importance.sum() + 1e-6)
-        load_balance_loss = self.num_experts * torch.sum(importance ** 2)
+        if self.balance == 'switch':
+            # Switch-Transformer loss: E * sum_j f_j * P_j, where f_j is the
+            # (non-differentiable) fraction of selections that went to expert j.
+            counts = torch.bincount(top_k_indices.flatten(), minlength=self.num_experts)
+            frac = (counts.to(probs.dtype) / top_k_indices.numel()).detach()
+            load_balance_loss = self.num_experts * torch.sum(frac * importance)
+        else:
+            importance = importance / (importance.sum() + 1e-6)
+            load_balance_loss = self.num_experts * torch.sum(importance ** 2)
 
         return top_k_weights, top_k_indices, load_balance_loss
 
 class MoEBlock(nn.Module):
-    def __init__(self, num_heads, in_planes, prompt_len):
+    def __init__(self, num_heads, in_planes, prompt_len, prompt_std=.02, qk_norm=False,
+                 qk_scale_init=10.0):
         super().__init__()
-        # PRM init
+        # PRM init. Official std 0.02 gives |prompt| ~0.55 vs ~27 for the
+        # LayerNorm'd keys; v2 may raise it (truncation stays at 2 std).
         self.prompt = nn.Parameter(torch.zeros(1, prompt_len, in_planes))
-        trunc_normal_(self.prompt, std=.02)
-        self.prm = PromptRecapBlock(embedding_dim=in_planes, num_heads=num_heads)
+        trunc_normal_(self.prompt, std=prompt_std, a=-2 * prompt_std, b=2 * prompt_std)             if prompt_std != .02 else trunc_normal_(self.prompt, std=.02)
+        self.prm = PromptRecapBlock(embedding_dim=in_planes, num_heads=num_heads,
+                                    qk_norm=qk_norm, qk_scale_init=qk_scale_init)
 
     def forward(self, inv_features):
         # PRM
@@ -653,18 +687,31 @@ class Vision_Transformer_ViSA(nn.Module):
         self.num_experts_per_type = cfg.MODEL.BACKBONE.EXPERTS
         self.top_k = cfg.MODEL.BACKBONE.TOP_K
         self.gtop_k = cfg.MODEL.BACKBONE.GRAPH_TOP_K
+        self.expert_kv = cfg.MODEL.BACKBONE.EXPERT_KV
+        assert self.expert_kv in ("global", "patch"), self.expert_kv
+        self.graph_per_query = cfg.MODEL.BACKBONE.GRAPH_PER_QUERY
+        self.separate_view_gcn = cfg.MODEL.BACKBONE.SEPARATE_VIEW_GCN
+        expert_kwargs = dict(prompt_std=cfg.MODEL.BACKBONE.EXPERT_PROMPT_STD,
+                             qk_norm=cfg.MODEL.BACKBONE.EXPERT_QK_NORM,
+                             qk_scale_init=cfg.MODEL.BACKBONE.EXPERT_QK_SCALE_INIT)
         self.share_experts = nn.ModuleList([
-            MoEBlock(num_heads, self.in_planes, self.prompt_len) for _ in range(self.num_experts_per_type)
+            MoEBlock(num_heads, self.in_planes, self.prompt_len, **expert_kwargs) for _ in range(self.num_experts_per_type)
         ])
         self.sky_experts = nn.ModuleList([
-            MoEBlock(num_heads, self.in_planes, self.prompt_len) for _ in range(self.num_experts_per_type)
+            MoEBlock(num_heads, self.in_planes, self.prompt_len, **expert_kwargs) for _ in range(self.num_experts_per_type)
         ])
         self.ground_experts = nn.ModuleList([
-            MoEBlock(num_heads, self.in_planes, self.prompt_len) for _ in range(self.num_experts_per_type)
+            MoEBlock(num_heads, self.in_planes, self.prompt_len, **expert_kwargs) for _ in range(self.num_experts_per_type)
         ])
-        self.share_router = Router(self.in_planes, self.num_experts_per_type, self.top_k)
-        self.sky_router = Router(self.in_planes, self.num_experts_per_type, self.top_k)
-        self.ground_router = Router(self.in_planes, self.num_experts_per_type, self.top_k)
+        router_kwargs = dict(noise_std=cfg.MODEL.BACKBONE.ROUTER_NOISE_STD,
+                             balance=cfg.MODEL.BACKBONE.MOE_BALANCE_LOSS)
+        self.share_router = Router(self.in_planes, self.num_experts_per_type, self.top_k, **router_kwargs)
+        self.sky_router = Router(self.in_planes, self.num_experts_per_type, self.top_k, **router_kwargs)
+        self.ground_router = Router(self.in_planes, self.num_experts_per_type, self.top_k, **router_kwargs)
+        self.router_input = cfg.MODEL.BACKBONE.ROUTER_INPUT
+        assert self.router_input in ('view', 'content'), self.router_input
+        # Read by the meta-architecture (official value was hard-coded there).
+        self.moe_balance_lambda = cfg.MODEL.BACKBONE.MOE_BALANCE_LAMBDA
 
         self.share_gcn = GraphConvolution(self.in_planes, class_num=self.prompt_len)
         self.view_gcn = GraphConvolution(self.in_planes, class_num=self.prompt_len)
@@ -683,7 +730,14 @@ class Vision_Transformer_ViSA(nn.Module):
                 mask = (expert_indices == expert_idx)  # [B]
                 if mask.any():
                     selected_x = x[mask]  # [B_sel, 1, D]
-                    expert_out = experts[expert_idx](selected_x)  # [B_sel, m, D]
+                    if (self.expert_kv == "patch" and self.activation_checkpointing
+                            and self.training and torch.is_grad_enabled()):
+                        # Patch keys make expert activations ~200x larger;
+                        # recompute them in backward (experts have no dropout/BN).
+                        expert_out = checkpoint(experts[expert_idx], selected_x,
+                                                use_reentrant=False, preserve_rng_state=True)
+                    else:
+                        expert_out = experts[expert_idx](selected_x)  # [B_sel, m, D]
                     output[mask] += expert_out * expert_weights[mask].view(-1, 1, 1)
         return output
 
@@ -698,44 +752,78 @@ class Vision_Transformer_ViSA(nn.Module):
             local_feat = self.b1(local_features)
         global_features = local_feat[:, 0:1]
         view_features = local_feat[:, 1:2]
+        # Patch tokens after b1 + LayerNorm: same scale as the routing tokens.
+        b1_patches = local_feat[:, 2:]
         local_feat = local_features[:, 2:]
         inv_features = global_features - view_features
         # strength_features = global_features + view_features
 
+        # Keys/values the experts cross-attend to. Routers always see only the
+        # routing token, so routing is unchanged by EXPERT_KV.
+        if self.expert_kv == "patch":
+            share_kv = torch.cat([inv_features, b1_patches], dim=1)  # [B, 1+N, D]
+            view_kv = torch.cat([view_features, b1_patches], dim=1)
+        else:
+            share_kv = inv_features  # [B, 1, D] (official)
+            view_kv = view_features
+
+        # What the view-specific routers look at. Official: the view token,
+        # which starts from one shared vector per view. v3 "content": the mean
+        # of the b1 patch tokens, i.e. this image's content.
+        view_route = b1_patches.mean(dim=1, keepdim=True) if self.router_input == "content" else view_features
+
         # moe-prm
         moe_output = torch.zeros(B, self.prompt_len, self.in_planes, device=x.device, dtype=x.dtype)
         share_weights, share_indices, load_balance_loss_s = self.share_router(inv_features)
-        share_output = self._compute_expert_output(inv_features, share_weights, share_indices, self.share_experts)
+        share_output = self._compute_expert_output(share_kv, share_weights, share_indices, self.share_experts)
         sky_mask = (view_id == 0)
         ground_mask = (view_id == 1)
         if sky_mask.any():
-            sky_weights, sky_indices, load_balance_loss_sky = self.sky_router(view_features[sky_mask])
+            sky_weights, sky_indices, load_balance_loss_sky = self.sky_router(view_route[sky_mask])
             load_balance_loss_s += load_balance_loss_sky * sky_mask.sum() / B
-            sky_output = self._compute_expert_output(view_features[sky_mask], sky_weights, sky_indices, self.sky_experts)
+            sky_output = self._compute_expert_output(view_kv[sky_mask], sky_weights, sky_indices, self.sky_experts)
             # sky_concat = torch.cat([share_output[sky_mask], sky_output], dim=1)
             moe_output[sky_mask] = sky_output
         if ground_mask.any():
-            ground_weights, ground_indices, load_balance_loss_ground = self.ground_router(view_features[ground_mask])
+            ground_weights, ground_indices, load_balance_loss_ground = self.ground_router(view_route[ground_mask])
             load_balance_loss_s += load_balance_loss_ground * ground_mask.sum() / B
-            ground_output = self._compute_expert_output(view_features[ground_mask], ground_weights, ground_indices, self.ground_experts)
+            ground_output = self._compute_expert_output(view_kv[ground_mask], ground_weights, ground_indices, self.ground_experts)
             # ground_concat = torch.cat([share_output[ground_mask], ground_output], dim=1)
             moe_output[ground_mask] = ground_output
 
         local_feat_norm = F.normalize(local_feat, dim=-1)  # [B, N_local, D]
-        inv_feat_norm = F.normalize(inv_features, dim=-1)  # [B, 1, D]
-        view_feat_norm = F.normalize(view_features, dim=-1)  # [B, 1, D]
-        sim_share = torch.matmul(inv_feat_norm, local_feat_norm.transpose(1, 2)).squeeze(1)
-        sim_view = torch.matmul(view_feat_norm, local_feat_norm.transpose(1, 2)).squeeze(1)
         k = self.gtop_k
-        topk_share = sim_share.topk(k, dim=-1).indices  # [B, k]
-        topk_view = sim_view.topk(k, dim=-1).indices  # [B, k]
+        if self.graph_per_query:
+            # Paper Eq. 8: every expert query picks its own top-k patches.
+            n_query = share_output.shape[1]
+            share_q_norm = F.normalize(share_output, dim=-1)  # [B, M, D]
+            view_q_norm = F.normalize(moe_output, dim=-1)  # [B, M, D]
+            topk_share = torch.matmul(share_q_norm, local_feat_norm.transpose(1, 2)).topk(k, dim=-1).indices  # [B, M, k]
+            topk_view = torch.matmul(view_q_norm, local_feat_norm.transpose(1, 2)).topk(k, dim=-1).indices  # [B, M, k]
+            # Gather from the un-expanded [B, N_local, D] tensor with flattened
+            # indices, so backward scatters into [B, N_local, D] instead of
+            # materialising a [B, M, N_local, D] gradient.
+            dim = local_feat.size(-1)
+            node_cluster_local_share = torch.gather(
+                local_feat, 1, topk_share.reshape(B, n_query * k, 1).expand(-1, -1, dim)
+            ).view(B, n_query, k, dim)  # [B, M, k, D]
+            node_cluster_local_view = torch.gather(
+                local_feat, 1, topk_view.reshape(B, n_query * k, 1).expand(-1, -1, dim)
+            ).view(B, n_query, k, dim)  # [B, M, k, D]
+        else:
+            inv_feat_norm = F.normalize(inv_features, dim=-1)  # [B, 1, D]
+            view_feat_norm = F.normalize(view_features, dim=-1)  # [B, 1, D]
+            sim_share = torch.matmul(inv_feat_norm, local_feat_norm.transpose(1, 2)).squeeze(1)
+            sim_view = torch.matmul(view_feat_norm, local_feat_norm.transpose(1, 2)).squeeze(1)
+            topk_share = sim_share.topk(k, dim=-1).indices  # [B, k]
+            topk_view = sim_view.topk(k, dim=-1).indices  # [B, k]
 
-        node_cluster_local_share = torch.gather(
-            local_feat, 1, topk_share.unsqueeze(-1).expand(-1, -1, local_feat.size(-1))
-        ).unsqueeze(dim=1).repeat(1, share_output.shape[1], 1, 1)  # [B, N, k, D]
-        node_cluster_local_view = torch.gather(
-            local_feat, 1, topk_view.unsqueeze(-1).expand(-1, -1, local_feat.size(-1))
-        ).unsqueeze(dim=1).repeat(1, share_output.shape[1], 1, 1)  # [B, N, k, D]
+            node_cluster_local_share = torch.gather(
+                local_feat, 1, topk_share.unsqueeze(-1).expand(-1, -1, local_feat.size(-1))
+            ).unsqueeze(dim=1).repeat(1, share_output.shape[1], 1, 1)  # [B, N, k, D]
+            node_cluster_local_view = torch.gather(
+                local_feat, 1, topk_view.unsqueeze(-1).expand(-1, -1, local_feat.size(-1))
+            ).unsqueeze(dim=1).repeat(1, share_output.shape[1], 1, 1)  # [B, N, k, D]
 
         with torch.no_grad():
 
@@ -748,7 +836,8 @@ class Vision_Transformer_ViSA(nn.Module):
             edge_vp = cal_edge_emb(feat_vp).detach()
 
         graph_o_share = self.norm_share(self.share_gcn(feat_sp, edge_sp)) + share_output
-        graph_o_view = self.norm_view(self.share_gcn(feat_vp, edge_vp)) + moe_output
+        view_gcn = self.view_gcn if self.separate_view_gcn else self.share_gcn
+        graph_o_view = self.norm_view(view_gcn(feat_vp, edge_vp)) + moe_output
 
         graph_o = torch.cat([self.out_token.unsqueeze(dim=0).repeat(B, 1, 1), graph_o_share, graph_o_view], dim=1)
 

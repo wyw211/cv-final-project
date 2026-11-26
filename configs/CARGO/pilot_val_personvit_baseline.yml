@@ -1,0 +1,13 @@
+# Pilot (screening) run: P2 = baseline with the PersonViT LUPerson self-supervised ViT-B/16
+# (hustvl/PersonViT, teacher, checkpoint0240; converted by tools/convert_personvit.py)
+# instead of ImageNet-21k jx_vit_base. Pixel normalisation is unchanged (PersonViT also
+# uses mean/std 0.5). PersonViT fine-tunes at LR 4e-4 with batch 64, i.e. 1.6e-3 at our
+# batch 256 under linear scaling, so the pretrained ViT gets 0.2 x BASE_LR (0.008);
+# new ViSA modules (experts, GCN, heads) keep the official LR.
+_BASE_: pilot_val_baseline.yml
+MODEL:
+  BACKBONE:
+    PRETRAIN_PATH: weights/personvit_vitb_lup_teacher_e240_s12.pth
+SOLVER:
+  PRETRAINED_LR_FACTOR: 0.2
+OUTPUT_DIR: logs/CARGO_pilot/personvit_baseline

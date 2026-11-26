@@ -26,6 +26,9 @@ def main():
     parser.add_argument('--activation-checkpointing', action='store_true')
     parser.add_argument('--passes', type=int, default=1)
     parser.add_argument('--real-training-data', action='store_true')
+    parser.add_argument('--config-file', default='configs/CARGO/visa_official_single_gpu.yml')
+    parser.add_argument('--opts', nargs=argparse.REMAINDER, default=[],
+                        help='extra KEY VALUE config overrides, e.g. MODEL.BACKBONE.EXPERT_KV patch')
     args = parser.parse_args()
     assert args.batch_size % 4 == 0 and args.passes > 0
     torch.set_num_threads(8)
@@ -63,7 +66,10 @@ def main():
 
     try:
         cfg = get_cfg()
-        cfg.merge_from_file('configs/CARGO/visa_official_single_gpu.yml')
+        cfg.merge_from_file(args.config_file)
+        cfg.merge_from_list(args.opts)
+        report['config_file'] = args.config_file
+        report['opts'] = args.opts
         cfg.SOLVER.IMS_PER_BATCH = args.batch_size
         cfg.MODEL.BACKBONE.ACTIVATION_CHECKPOINTING = args.activation_checkpointing
         cfg.MODEL.HEADS.NUM_CLASSES = 2500
@@ -143,6 +149,9 @@ def main():
         suffix = '_checkpointing' if args.activation_checkpointing else ''
         if args.real_training_data:
             suffix += '_cargo'
+        if args.opts:
+            # Keep the official-setting audit files from being overwritten.
+            suffix += '_' + '_'.join(str(v).split('.')[-1].lower() for v in args.opts)
         output=ROOT/f'output/audit/batch_{args.batch_size}{suffix}_memory.json'
         output.parent.mkdir(parents=True,exist_ok=True)
         output.write_text(json.dumps(report,indent=2),encoding='utf-8')
