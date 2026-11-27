@@ -47,6 +47,7 @@ CARGO 測試集 ALL mAP 從 64.59（我們復現的 baseline）提高到 **73.38
 | 夜間增強 L1 / 亮度校正 L2 / 光照一致性損失 L3 | 都無效 | 夜間影像缺的是資訊，不是亮度；見 NEXT_IMPROVEMENTS §13 |
 | **αQE 後處理** | **驗證集 A↔A mAP +5.0，夜間 +7.0** | `tools/posthoc_val.py`；比 re-ranking 穩定，不傷 A↔A |
 | 翻轉 TTA、依光照或攝影機做特徵去中心化 | 幾乎無效 | NEXT_IMPROVEMENTS §14 |
+| αQE + k-reciprocal re-ranking 疊加 | 無效，A↔A 下降；測試集未跑 | `tools/posthoc_rerank_val.py`；NEXT_IMPROVEMENTS §17 |
 
 **A↔A 的弱點**：驗證集上夜間 A↔A mAP 76.75，白天 92.64；測試集剩下的 8 個 A↔A R1 失敗全部是夜間 query。這可以寫進報告的限制與分析。
 

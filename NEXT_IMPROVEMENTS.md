@@ -361,3 +361,28 @@ R1 failure statistics of final + αQE (test):
 
 All remaining A↔A failures on test are night queries (same pattern as val). Typical failures: very dark, tiny
 aerial crops where the top-10 are other dark silhouettes; A→G failures often retrieve people with similar clothing.
+
+## 17. αQE + k-reciprocal re-ranking 組合（只用驗證集）— 2026-11-27
+
+目的：αQE 和重排序過去只各自單獨評估過，想知道兩者疊加會不會更好。
+工具：`tools/posthoc_rerank_val.py`（只接受 `_VAL` 協定），特徵為 PersonViT + 4 專家 pilot 的快取（`logs/posthoc/*.npz`）。
+重排序直接呼叫 FastReID 的 `compute_jaccard_distance`（和測試集重排序同一份程式），最終距離 = 0.7 × Jaccard + 0.3 × cosine。
+組合順序：先做 αQE（k=2、α=3）改特徵，再重排序。原始輸出：`results/val/posthoc_rerank_personvit_experts4.json`。
+
+**事先固定的判斷標準**：組合的 ALL mAP 要比單獨 αQE 高 1 分以上，且 A↔A 與夜間 A↔A mAP 不能下降；否則維持只用 αQE，測試集不跑。
+
+mAP（R1）；夜間 = 該協定的夜間 query。
+
+| 組合 | ALL | A→G | A↔A | G↔G | 夜間 A↔A |
+|---|---:|---:|---:|---:|---:|
+| base | 87.88 (94.00) | 86.00 (89.60) | 84.60 (91.16) | 92.98 (96.80) | 76.75 (83.33) |
+| αQE k=2 α=3 | 92.36 (93.60) | 89.92 (88.80) | **89.60** (91.57) | 95.46 (96.40) | **83.71** (84.92) |
+| 重排序 k1=20 k2=6 λ=0.3 | **93.76 (94.60)** | 90.03 (90.40) | 88.52 (90.76) | **95.62** (96.80) | 81.64 (82.54) |
+| αQE → 重排序 k1=20 | 92.82 (93.00) | 89.23 (89.60) | 88.43 (91.16) | 94.62 (96.80) | 81.70 (84.13) |
+| αQE → 重排序 k1=10 | 91.69 (92.60) | **90.04** (89.60) | 88.95 (90.76) | 95.44 (96.80) | 82.06 (83.33) |
+
+- **重現檢查通過**：base 與 αQE 的數字和 §14 完全相同。
+- **兩組組合都沒過標準**：ALL 只比 αQE +0.46（k1=20）或反而 −0.67（k1=10）；A↔A 都比 αQE 低（−1.17／−0.65），夜間 A↔A 也低（−2.01／−1.65）。
+- 疊加後甚至比單獨重排序還差。推測（未另外驗證）：αQE 已經把鄰居的特徵混在一起，重排序再依同一批鄰居計算 Jaccard 距離，資訊重複，鄰居之間的差異也被抹平。
+- 單獨重排序在驗證集 ALL 最高（93.76），但 A↔A 和夜間 A↔A 比 αQE 低，和測試集上重排序傷到 A↔A 的現象一致。
+- **結論：維持只用 αQE，測試集不跑這個組合。** 可當作負面結果：兩種後處理作用重疊，疊加沒有額外幫助。
