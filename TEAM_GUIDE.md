@@ -2,6 +2,7 @@
 
 這份文件說明我們在官方 ViSA 程式（[Cat-Zero/ViSA](https://github.com/Cat-Zero/ViSA)）上做了什麼、結果如何，以及每個檔案的用途。
 完整的實驗過程、數字與失敗的嘗試，請看 [NEXT_IMPROVEMENTS.md](NEXT_IMPROVEMENTS.md)（依時間順序記錄）。
+每個實驗的目的與想回答的問題，請看 [EXPERIMENT_PURPOSES.md](EXPERIMENT_PURPOSES.md)。
 
 ## 1. 一句話總結
 
@@ -54,6 +55,7 @@ CARGO 測試集 ALL mAP 從 64.59（我們復現的 baseline）提高到 **73.38
 | 路徑 | 內容 |
 |---|---|
 | `NEXT_IMPROVEMENTS.md` | 全部實驗紀錄（時間順序，含數字） |
+| `EXPERIMENT_PURPOSES.md` | 每個實驗的目的、想回答的問題與結論（寫報告用） |
 | `results/figures/` | 檢索視覺化：`CARGO_*_final_aqe.png`（成功與失敗範例）、`compare_CARGO_*.png`（baseline 對照我們）。範例用 seed 0 隨機挑選，不是手挑 |
 | `results/test/aqe_test_results.json` | 第 2 節測試數字的原始輸出 |
 | `results/efficiency/` | Params、GFLOPs、延遲（兩次、順序對調） |
